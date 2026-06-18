@@ -22,22 +22,48 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 // ============ Cached ZAI SDK Instance ============
+// The z-ai-web-dev-sdk's ZAI.create() looks for a .z-ai-config file in
+// process.cwd(), os.homedir(), or /etc/ — none of which are writable or
+// pre-populated on serverless platforms like Vercel. We bypass create()
+// and construct the ZAI client directly from environment variables, which
+// works on Vercel, Netlify, Cloudflare, and any other serverless host.
+//
+// Required env vars (set them in your Vercel project settings):
+//   ZAI_BASE_URL  — e.g. https://internal-api.z.ai/v1
+//   ZAI_API_KEY   — e.g. Z.ai
+//   ZAI_TOKEN     — JWT issued for your account
+//   ZAI_USER_ID   — UUID of your user
+//   ZAI_CHAT_ID   — chat session UUID (optional; SDK will work without it)
 let zaiInstance: any = null;
 let zaiInstancePromise: Promise<any> | null = null;
 
 async function getZAI(): Promise<any> {
   if (zaiInstance) return zaiInstance;
   if (zaiInstancePromise) return zaiInstancePromise;
-  zaiInstancePromise = ZAI.create()
-    .then((zai: any) => {
-      zaiInstance = zai;
-      zaiInstancePromise = null;
-      return zai;
-    })
-    .catch((err: any) => {
-      zaiInstancePromise = null;
-      throw err;
-    });
+
+  zaiInstancePromise = Promise.resolve().then(() => {
+    const config: Record<string, string> = {
+      baseUrl: process.env.ZAI_BASE_URL || "https://internal-api.z.ai/v1",
+      apiKey: process.env.ZAI_API_KEY || "Z.ai",
+      token: process.env.ZAI_TOKEN!,
+      userId: process.env.ZAI_USER_ID!,
+    };
+    const chatId = process.env.ZAI_CHAT_ID;
+    if (chatId) config.chatId = chatId;
+
+    if (!config.token || !config.userId) {
+      throw new Error(
+        "Missing ZAI_TOKEN or ZAI_USER_ID environment variables. " +
+          "Set them in your Vercel project settings (Settings → Environment Variables)."
+      );
+    }
+
+    // Construct directly — bypasses the file-based config loader in ZAI.create()
+    zaiInstance = new (ZAI as any)(config);
+    zaiInstancePromise = null;
+    return zaiInstance;
+  });
+
   return zaiInstancePromise;
 }
 
